@@ -1,0 +1,83 @@
+---
+# ============================================================================
+# 🔧 CONEXÃO DE SORTE - ZOOKEEPER INFRAESTRUTURA
+# ============================================================================
+# Data de Criação: 17/09/2025 às 04:25 BRT
+# Última Atualização: 17/09/2025 às 04:25 BRT
+# Responsável: Sistema Automatizado
+# Versão: 1.0.0
+# ============================================================================
+#
+# ZOOKEEPER STANDALONE - Kafka Coordination Service
+# - Docker Swarm deployment
+# - Overlay encrypted network para segurança
+# - Named volumes com placement constraints
+# - Health checks otimizados para produção
+# - Configuração específica para Kafka
+# ============================================================================
+
+services:
+  # ============================================================================
+  # 🔧 ZOOKEEPER - Kafka Coordination
+  # ============================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.0
+    hostname: conexao-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_INIT_LIMIT: 10
+      ZOOKEEPER_MAX_CLIENT_CNXNS: 60
+      ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
+      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
+    networks:
+      conexao-network-swarm:
+        aliases:
+          - conexao-zookeeper
+          - zookeeper
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: >
+        ["CMD", "/bin/bash", "-lc",
+         "echo ruok | nc -w 2 localhost 2181 | grep imok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 5
+        window: 300s
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+# ============================================================================
+# 📦 VOLUMES EXTERNOS
+# ============================================================================
+volumes:
+  zookeeper_data:
+    external: true
+    name: zookeeper_data
+  zookeeper_logs:
+    external: true
+    name: zookeeper_logs
+
+# ============================================================================
+# 🌐 NETWORKS EXTERNOS
+# ============================================================================
+networks:
+  conexao-network-swarm:
+    external: true
+    name: conexao-network-swarm

@@ -1,0 +1,151 @@
+name: "🔧 Zookeeper Infrastructure – CI/CD Pipeline"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  SERVICE_NAME: zookeeper-infrastructure
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.3.0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-yaml
+
+      - name: Validate Docker Compose
+        run: |
+          # Validar sintaxe do docker-compose.yml
+          docker compose -f docker-compose.yml config -q
+          echo "✅ Docker Compose syntax is valid"
+
+      - name: Security Validation
+        run: |
+          # Verificar se não há hardcoded passwords
+          if grep -r "password.*:" docker-compose.yml | grep -v "\${" | grep -v "#" | grep -v "external:"; then
+            echo "❌ Found potential hardcoded passwords"
+            exit 1
+          else
+            echo "✅ No hardcoded passwords found"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.5.0
+        with:
+          name: zookeeper-configs
+          path: |
+            docker-compose.yml
+
+  deploy-selfhosted:
+    needs: validate-and-build
+    runs-on: [ self-hosted, Linux, X64, conexao, conexao-de-sorte-zookeeper-infraestrutura ]
+    timeout-minutes: 15
+    if: github.ref == 'refs/heads/main'
+    env:
+      DOCKER_NETWORK_NAME: conexao-network-swarm
+      STACK_NAME: conexao-zookeeper
+      COMPOSE_FILE: docker-compose.yml
+    steps:
+      - uses: actions/checkout@v4.3.0
+        with:
+          clean: true
+          fetch-depth: 1
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          name: zookeeper-configs
+          path: .
+
+      - name: 🚀 Deploy Zookeeper Stack (Swarm-Only)
+        env:
+          STACK_NAME: conexao-zookeeper
+          COMPOSE_FILE: docker-compose.yml
+        run: |
+          echo "🚀 Iniciando deploy do Zookeeper com Docker Swarm..."
+
+          # Remover stack existente se houver
+          if docker stack ls | grep -q "$STACK_NAME"; then
+            echo "🔄 Removendo stack existente '$STACK_NAME'..."
+            docker stack rm "$STACK_NAME"
+            sleep 10
+          fi
+
+          # Deploy da nova stack
+          echo "🏗️ Executando deploy da stack '$STACK_NAME'..."
+          docker stack deploy -c "$COMPOSE_FILE" "$STACK_NAME"
+
+          echo "⏰ Aguardando estabilização dos serviços..."
+          sleep 30
+
+      - name: Healthcheck Zookeeper
+        env:
+          STACK_NAME: conexao-zookeeper
+        run: |
+          echo "🔍 Validando saúde do Zookeeper..."
+
+          # Aguardar até 3 minutos para Zookeeper ficar disponível
+          timeout=180
+          elapsed=0
+
+          while [ $elapsed -lt $timeout ]; do
+            ZOOKEEPER_CONTAINER=$(docker ps -q -f name="${STACK_NAME}_zookeeper" | head -1)
+
+            if [ -n "$ZOOKEEPER_CONTAINER" ]; then
+              # Testar se Zookeeper responde ao comando 'ruok'
+              if docker exec "$ZOOKEEPER_CONTAINER" bash -c "echo ruok | nc -w 2 localhost 2181 | grep imok" 2>/dev/null; then
+                echo "✅ Zookeeper health check passed"
+                break
+              else
+                echo "⏳ Zookeeper ainda não está pronto... ($elapsed/$timeout segundos)"
+                sleep 10
+                elapsed=$((elapsed + 10))
+              fi
+            else
+              echo "⏳ Container Zookeeper ainda não encontrado... ($elapsed/$timeout segundos)"
+              sleep 10
+              elapsed=$((elapsed + 10))
+            fi
+          done
+
+          if [ $elapsed -ge $timeout ]; then
+            echo "❌ Zookeeper health check failed - timeout após $timeout segundos"
+            exit 1
+          fi
+
+      - name: Connectivity Validation
+        env:
+          STACK_NAME: conexao-zookeeper
+        run: |
+          echo "🔗 Validando conectividade do Zookeeper..."
+
+          # Verificar se o serviço está listado no Swarm
+          if docker service ls | grep -q "${STACK_NAME}_zookeeper"; then
+            echo "✅ Serviço Zookeeper encontrado no Swarm"
+          else
+            echo "❌ Serviço Zookeeper não encontrado no Swarm"
+            exit 1
+          fi
+
+          # Verificar se está na rede correta
+          if docker network inspect conexao-network-swarm | grep -q zookeeper; then
+            echo "✅ Zookeeper conectado à rede overlay"
+          else
+            echo "⚠️ Zookeeper pode não estar na rede overlay correta"
+          fi
+
+          echo "📊 Status final dos serviços:"
+          docker service ls --filter name="${STACK_NAME}_*" --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}"
