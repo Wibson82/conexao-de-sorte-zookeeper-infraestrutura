@@ -40,9 +40,7 @@ services:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
     healthcheck:
-      test: >
-        ["CMD", "/bin/bash", "-lc",
-         "echo ruok | nc -w 2 localhost 2181 | grep imok"]
+      test: ["CMD", "zkServer.sh", "status"]
       interval: 30s
       timeout: 10s
       retries: 5
