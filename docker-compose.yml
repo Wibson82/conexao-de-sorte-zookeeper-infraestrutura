@@ -24,6 +24,8 @@ services:
     image: confluentinc/cp-zookeeper:7.9.0
     hostname: conexao-zookeeper
     environment:
+      # 🔧 CONFIGURAÇÃO STANDALONE CORRIGIDA
+      ZOOKEEPER_SERVER_ID: 1
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
       ZOOKEEPER_SYNC_LIMIT: 2
@@ -31,6 +33,11 @@ services:
       ZOOKEEPER_MAX_CLIENT_CNXNS: 60
       ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
       ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
+      # 🛡️ CONFIGURAÇÃO STANDALONE EXPLÍCITA
+      ZOOKEEPER_SERVERS: server.1=conexao-zookeeper:2888:3888
+      # 🚀 PERFORMANCE E STABILIDADE
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
     networks:
       conexao-network-swarm:
         aliases:
@@ -40,26 +47,47 @@ services:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
     healthcheck:
-      test: ["CMD", "zkServer.sh", "status"]
+      # 🩺 HEALTH CHECK ROBUSTO - TESTA CONECTIVIDADE REAL
+      test: [
+        "CMD-SHELL",
+        "echo 'ruok' | nc localhost 2181 | grep -q 'imok' && echo 'stats' | nc localhost 2181 | grep -q 'Mode:'"
+      ]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
     deploy:
+      # 🛡️ SINGLE INSTANCE FORTE - PREVINE MÚLTIPLAS INSTÂNCIAS
       replicas: 1
       placement:
         constraints:
           - node.role == manager
+        max_replicas_per_node: 1
       restart_policy:
+        # 🔧 RESTART POLICY CONSERVADORA - EVITA LOOPS
         condition: on-failure
-        delay: 30s
-        max_attempts: 5
-        window: 300s
+        delay: 60s
+        max_attempts: 3
+        window: 600s
       resources:
         limits:
-          memory: 512M
+          # 🚀 RESOURCES ADEQUADOS PARA ZOOKEEPER
+          memory: 1G
+          cpus: '0.5'
         reservations:
-          memory: 256M
+          memory: 512M
+          cpus: '0.25'
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        monitor: 60s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: pause
+        monitor: 60s
 
 # ============================================================================
 # 📦 VOLUMES EXTERNOS
