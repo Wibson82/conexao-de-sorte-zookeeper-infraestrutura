@@ -24,13 +24,13 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Validate Azure identifiers (vars)
+      - name: Validate Azure identifiers (secrets)
         env:
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_KEYVAULT_NAME: ${{ vars.AZURE_KEYVAULT_NAME }}
-          AZURE_KEYVAULT_ENDPOINT: ${{ vars.AZURE_KEYVAULT_ENDPOINT }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEYVAULT_NAME: ${{ secrets.AZURE_KEYVAULT_NAME }}
+          AZURE_KEYVAULT_ENDPOINT: ${{ secrets.AZURE_KEYVAULT_ENDPOINT }}
         run: |
           set -Eeuo pipefail
           missing=()
@@ -101,12 +101,12 @@ jobs:
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Confirm Key Vault usage
-        if: vars.AZURE_KEYVAULT_NAME != ''
+        if: secrets.AZURE_KEYVAULT_NAME != ''
         run: |
           echo 'Deploy do Zookeeper não consome segredos do Key Vault (lista vazia).'
 
