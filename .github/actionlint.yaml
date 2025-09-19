@@ -1,0 +1,7 @@
+self-hosted-runner:
+  labels:
+    - self-hosted
+    - Linux
+    - X64
+    - srv649924
+    - conexao-de-sorte-zookeeper-infraestrutura

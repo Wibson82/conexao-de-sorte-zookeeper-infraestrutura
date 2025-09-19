@@ -1,5 +1,13 @@
 # 📋 HISTÓRICO DE MUDANÇAS - ZOOKEEPER INFRAESTRUTURA
 
+## 🗓️ **19/09/2025 - Início da auditoria Hostinger**
+
+### ✅ Itens catalogados
+- Inventário de segredos/documentação inicial migrados para `docs/`.
+- Checklist de conformidade criado para nortear a refatoração do pipeline.
+- Próximos passos: atualizar workflow com OIDC + Key Vault seletivo, endurecer compose e registrar validações.
+
+---
 ## 🗓️ **18/09/2025 - Refatoração Health Checks Sem Dependências Externas**
 
 ### ✅ **MUDANÇAS REALIZADAS**

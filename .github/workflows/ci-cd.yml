@@ -1,4 +1,4 @@
-name: "🔧 Zookeeper Infrastructure – CI/CD Pipeline"
+name: "🧩 Zookeeper Infrastructure – CI/CD"
 
 on:
   push:
@@ -7,172 +7,170 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  SERVICE_NAME: zookeeper-infrastructure
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
-  validate-and-build:
-    runs-on: ubuntu-latest
+  validate:
+    runs-on: [ self-hosted, Linux, X64, srv649924, conexao-de-sorte-zookeeper-infraestrutura ]
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4.3.0
+      - name: Checkout
+        uses: actions/checkout@v4.3.0
+        with:
+          fetch-depth: 1
 
-      - name: Install dependencies
+      - name: Validate Azure identifiers (vars)
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_KEYVAULT_NAME: ${{ vars.AZURE_KEYVAULT_NAME }}
+          AZURE_KEYVAULT_ENDPOINT: ${{ vars.AZURE_KEYVAULT_ENDPOINT }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-yaml
+          set -Eeuo pipefail
+          missing=()
+          for var in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_KEYVAULT_NAME; do
+            if [[ -z "${!var:-}" ]]; then
+              missing+=("$var")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            printf '❌ Repository Variables obrigatórias ausentes: %s\n' "${missing[*]}"
+            exit 1
+          fi
+          echo "✅ Identificadores Azure configurados via vars"
+          if [[ -z "${AZURE_KEYVAULT_ENDPOINT:-}" ]]; then
+            echo 'ℹ️ AZURE_KEYVAULT_ENDPOINT não definido (usando endpoint padrão)'
+          else
+            echo '✅ Endpoint customizado definido'
+          fi
+
+      - name: Ensure Python deps
+        run: |
+          set -Eeuo pipefail
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo '❌ python3 não está disponível no runner self-hosted.' >&2
+            exit 1
+          fi
+          python3 -c "import importlib.util, subprocess, sys; import importlib; spec = importlib.util.find_spec('yaml'); subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--user', 'PyYAML']) if spec is None else None"
+          echo "✅ Dependências Python disponíveis"
+
+      - name: Validate YAML files
+        run: |
+          set -Eeuo pipefail
+          python3 -c "import pathlib, yaml; [yaml.safe_load(pathlib.Path(p).read_text(encoding='utf-8')) for p in ('docker-compose.yml',)]; print('✅ YAML válido: docker-compose.yml')"
 
       - name: Validate Docker Compose
         run: |
-          # Validar sintaxe do docker-compose.yml
+          set -Eeuo pipefail
           docker compose -f docker-compose.yml config -q
-          echo "✅ Docker Compose syntax is valid"
+          echo "✅ docker-compose.yml válido"
 
-      - name: Security Validation
+      - name: Security scan (grep)
         run: |
-          # Verificar se não há hardcoded passwords
-          if grep -r "password.*:" docker-compose.yml | grep -v "\${" | grep -v "#" | grep -v "external:"; then
-            echo "❌ Found potential hardcoded passwords"
+          set -Eeuo pipefail
+          if grep -R "password[[:space:]]*:[[:space:]]*['\"]" --include="*.yml" docker-compose.yml 2>/dev/null | grep -v '\${'; then
+            echo "⚠️ Possível credencial hardcoded detectada"
             exit 1
-          else
-            echo "✅ No hardcoded passwords found"
           fi
+          echo "✅ Nenhum segredo hardcoded identificado"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4.5.0
-        with:
-          name: zookeeper-configs
-          path: |
-            docker-compose.yml
-
-  deploy-selfhosted:
-    needs: validate-and-build
-    runs-on: [ self-hosted, Linux, X64, conexao, conexao-de-sorte-zookeeper-infraestrutura ]
-    timeout-minutes: 15
-    if: github.ref == 'refs/heads/main'
+  deploy:
+    needs: validate
+    runs-on: [ self-hosted, Linux, X64, srv649924, conexao-de-sorte-zookeeper-infraestrutura ]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
     env:
-      DOCKER_NETWORK_NAME: conexao-network-swarm
       STACK_NAME: conexao-zookeeper
+      DOCKER_NETWORK_NAME: conexao-network-swarm
       COMPOSE_FILE: docker-compose.yml
     steps:
-      - uses: actions/checkout@v4.3.0
+      - name: Checkout
+        uses: actions/checkout@v4.3.0
         with:
-          clean: true
           fetch-depth: 1
+          clean: true
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4.1.8
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
         with:
-          name: zookeeper-configs
-          path: .
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: 🚀 Deploy Zookeeper Stack (Swarm-Only)
-        env:
-          STACK_NAME: conexao-zookeeper
-          COMPOSE_FILE: docker-compose.yml
+      - name: Confirm Key Vault usage
+        if: vars.AZURE_KEYVAULT_NAME != ''
         run: |
-          echo "🚀 Iniciando deploy do Zookeeper com Docker Swarm..."
+          echo 'Deploy do Zookeeper não consome segredos do Key Vault (lista vazia).'
 
-          # Remover stack existente se houver
-          if docker stack ls | grep -q "$STACK_NAME"; then
-            echo "🔄 Removendo stack existente '$STACK_NAME'..."
-            docker stack rm "$STACK_NAME"
-            sleep 8
-          fi
-
-          # Deploy da nova stack
-          echo "🏗️ Executando deploy da stack '$STACK_NAME'..."
-          docker stack deploy -c "$COMPOSE_FILE" "$STACK_NAME"
-
-          echo "⏰ Aguardando estabilização dos serviços..."
-          sleep 25
-
-      - name: Healthcheck Zookeeper (Sem NC)
-        env:
-          STACK_NAME: conexao-zookeeper
+      - name: Ensure Swarm resources
         run: |
-          echo "🔍 Validando saúde do Zookeeper com health checks robustos..."
-
-          # Aguardar até 2.5 minutos para Zookeeper ficar disponível
-          timeout=150
-          elapsed=0
-          health_passed=false
-
-          while [ $elapsed -lt $timeout ] && [ "$health_passed" = false ]; do
-            ZOOKEEPER_CONTAINER=$(docker ps -q -f name="${STACK_NAME}_zookeeper" | head -1)
-
-            if [ -n "$ZOOKEEPER_CONTAINER" ]; then
-              echo "🔍 Testando health check do Zookeeper... ($elapsed/$timeout segundos)"
-
-              # Método 1: Verificar logs para "binding to port"
-              if docker logs "$ZOOKEEPER_CONTAINER" 2>/dev/null | grep -q "binding to port.*2181\|Started.*ZooKeeper\|ZooKeeper.*started"; then
-                echo "✅ Zookeeper health check passed (logs validation)"
-                health_passed=true
-                break
-              fi
-
-              # Método 2: Verificar se porta 2181 está ativa (sem nc)
-              if docker exec "$ZOOKEEPER_CONTAINER" ss -tuln 2>/dev/null | grep -q ":2181 "; then
-                echo "✅ Zookeeper health check passed (port 2181 active)"
-                health_passed=true
-                break
-              fi
-
-              # Método 3: Verificar se processo Java está rodando
-              if docker exec "$ZOOKEEPER_CONTAINER" ps aux 2>/dev/null | grep -q "[j]ava.*zookeeper\|[j]ava.*QuorumPeerMain"; then
-                echo "✅ Zookeeper health check passed (process validation)"
-                health_passed=true
-                break
-              fi
-
-              echo "⏳ Zookeeper ainda não está pronto... ($elapsed/$timeout segundos)"
+          set -Eeuo pipefail
+          for volume in zookeeper_data zookeeper_logs; do
+            if ! docker volume ls | grep -q "${volume}$"; then
+              echo "📁 Criando volume $volume"
+              docker volume create "$volume"
             else
-              echo "⏳ Container Zookeeper ainda não encontrado... ($elapsed/$timeout segundos)"
+              echo "✅ Volume $volume já existe"
             fi
-
-            sleep 8
-            elapsed=$((elapsed + 8))
           done
-
-          if [ "$health_passed" = false ]; then
-            echo "⚠️ Zookeeper health check não passou em $timeout segundos"
-            echo "🔍 Verificando logs finais do Zookeeper..."
-            if [ -n "$ZOOKEEPER_CONTAINER" ]; then
-              echo "--- Últimos 25 logs do Zookeeper ---"
-              docker logs "$ZOOKEEPER_CONTAINER" --tail 25 2>/dev/null || true
-              echo "--- Fim dos logs ---"
-            fi
-            echo "💡 Nota: Zookeeper pode estar funcionando mesmo com health check parcial"
-            echo "💡 Verifique os logs acima para diagnóstico"
-            exit 1
+          for volume in zookeeper_data zookeeper_logs; do
+            docker run --rm -v "${volume}:/var/lib/zookeeper" alpine:3.20 \
+              sh -c 'chown -R 1000:1000 /var/lib/zookeeper' || true
+          done
+          if ! docker network ls | grep -q "$DOCKER_NETWORK_NAME"; then
+            echo "🌐 Criando rede $DOCKER_NETWORK_NAME"
+            docker network create --driver overlay "$DOCKER_NETWORK_NAME"
           else
-            echo "✅ Zookeeper health check concluído com sucesso!"
+            echo "✅ Rede $DOCKER_NETWORK_NAME já existe"
           fi
 
-      - name: Connectivity Validation
-        env:
-          STACK_NAME: conexao-zookeeper
+      - name: Deploy stack
         run: |
-          echo "🔗 Validando conectividade do Zookeeper..."
+          set -Eeuo pipefail
+          docker compose -f "$COMPOSE_FILE" config -q
+          docker stack deploy -c "$COMPOSE_FILE" "$STACK_NAME"
+          echo "⏳ Aguardando estabilização..."
+          sleep 30
 
-          # Verificar se o serviço está listado no Swarm
-          if docker service ls | grep -q "${STACK_NAME}_zookeeper"; then
-            echo "✅ Serviço Zookeeper encontrado no Swarm"
-          else
-            echo "❌ Serviço Zookeeper não encontrado no Swarm"
-            exit 1
-          fi
+      - name: Health check
+        run: |
+          set -Eeuo pipefail
+          service="${STACK_NAME}_zookeeper"
+          attempts=12
+          for attempt in $(seq 1 "$attempts"); do
+            echo "🔍 Tentativa $attempt/$attempts"
+            container=$(docker ps --filter "name=${service}" -q | head -n1)
+            if [[ -n "$container" ]]; then
+              if docker logs "$container" 2>/dev/null | grep -q "binding to port"; then
+                echo "✅ Logs indicam inicialização"
+                exit 0
+              fi
+              if docker exec "$container" ss -tuln 2>/dev/null | grep -q ":2181 "; then
+                echo "✅ Porta 2181 ativa"
+                exit 0
+              fi
+              if docker exec "$container" ps aux 2>/dev/null | grep -q "[q]uorumPeerMain"; then
+                echo "✅ Processo Zookeeper ativo"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "❌ Health check falhou"
+          docker service ps "$service" || true
+          docker service logs "$service" --tail 50 || true
+          exit 1
 
-          # Verificar se está na rede correta
-          if docker network inspect conexao-network-swarm | grep -q zookeeper; then
-            echo "✅ Zookeeper conectado à rede overlay"
-          else
-            echo "⚠️ Zookeeper pode não estar na rede overlay correta"
-          fi
-
-          echo "📊 Status final dos serviços:"
-          docker service ls --filter name="${STACK_NAME}_*" --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}"
+      - name: Post-deploy summary
+        run: |
+          set -Eeuo pipefail
+          docker service ls | grep -E "(zookeeper|NAME)" || true
+          echo "✅ Deploy concluído"
