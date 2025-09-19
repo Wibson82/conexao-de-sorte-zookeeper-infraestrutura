@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: [ self-hosted, Linux, X64, srv649924, conexao-de-sorte-zookeeper-infraestrutura ]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
