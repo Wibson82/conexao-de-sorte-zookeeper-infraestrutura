@@ -1,0 +1,103 @@
+---
+# ============================================================================
+# 🔧 ZOOKEEPER EMERGENCY V2 - CORREÇÃO CRÍTICA DOS LOOPS
+# ============================================================================
+# ANÁLISE: FASE 1 falhou - ainda múltiplas instâncias e health checks falhando
+# CORREÇÃO V2: Simplificar ao máximo, foco em estabilidade básica
+# ============================================================================
+
+services:
+  # ============================================================================
+  # 🔧 ZOOKEEPER V2 - ULTRA SIMPLIFICADO PARA ESTABILIDADE
+  # ============================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.0
+    hostname: conexao-zookeeper
+    environment:
+      # 🔧 CONFIGURAÇÃO MÍNIMA STANDALONE
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      # 🚨 REMOVIDO: ZOOKEEPER_SERVERS (causava conflito)
+      # 🚨 REMOVIDO: ZOOKEEPER_SERVER_ID (não necessário standalone)
+      # 🛡️ CONFIGURAÇÕES DE ESTABILIDADE
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_INIT_LIMIT: 10
+      ZOOKEEPER_MAX_CLIENT_CNXNS: 60
+      ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
+      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
+      # 🚀 JAVA HEAP OTIMIZADO
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
+    networks:
+      conexao-network-swarm:
+        aliases:
+          - conexao-zookeeper
+          - zookeeper
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    healthcheck:
+      # 🩺 HEALTH CHECK ULTRA SIMPLES - SEM DEPENDÊNCIAS EXTERNAS
+      test: ["CMD", "sh", "-c", "echo ruok | nc localhost 2181 || zkServer.sh status"]
+      interval: 45s
+      timeout: 20s
+      retries: 3
+      start_period: 180s
+    deploy:
+      # 🛡️ CONSTRAINT MAIS RIGOROSO
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+        # 🚨 CONSTRAINT ALTERNATIVO se max_replicas_per_node não funciona
+        preferences:
+          - spread: node.id
+      restart_policy:
+        # 🔧 RESTART POLICY ULTRA CONSERVADORA
+        condition: on-failure
+        delay: 120s  # 2 minutos entre tentativas
+        max_attempts: 2  # Apenas 2 tentativas
+        window: 900s     # 15 minutos de janela
+      update_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: rollback
+        monitor: 120s
+        order: stop-first  # 🚨 PARAR ANTES DE INICIAR NOVO
+      rollback_config:
+        parallelism: 1
+        delay: 60s
+        failure_action: pause
+        monitor: 120s
+      resources:
+        limits:
+          # 🚀 RESOURCES MAIS CONSERVADORES
+          memory: 800M
+          cpus: '0.4'
+        reservations:
+          memory: 400M
+          cpus: '0.2'
+      # 🏷️ LABELS PARA DEBUG
+      labels:
+        - "zookeeper.instance=unique"
+        - "zookeeper.version=emergency-v2"
+        - "zookeeper.mode=standalone-fixed"
+
+# ============================================================================
+# 🔐 VOLUMES EXTERNOS (mantidos)
+# ============================================================================
+volumes:
+  zookeeper_data:
+    external: true
+    name: zookeeper_data
+  zookeeper_logs:
+    external: true
+    name: zookeeper_logs
+
+# ============================================================================
+# 🌐 NETWORKS EXTERNOS (mantidos)
+# ============================================================================
+networks:
+  conexao-network-swarm:
+    external: true
+    name: conexao-network-swarm
