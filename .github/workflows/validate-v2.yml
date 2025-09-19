@@ -1,0 +1,54 @@
+name: "🧪 ZooKeeper V2 - Validation Only"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.3.0
+
+      - name: 🔐 Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ✅ Azure connectivity test
+        run: |
+          echo "🔗 Testando conectividade Azure..."
+          az account show --output table
+          echo "✅ Azure OIDC funcionando"
+
+      - name: 🔍 Validate Docker Compose V2
+        run: |
+          echo "📁 Arquivos disponíveis:"
+          ls -la *.yml
+          echo ""
+          echo "🔍 Validando docker-compose-emergency-v2.yml..."
+          if [[ -f docker-compose-emergency-v2.yml ]]; then
+            docker compose -f docker-compose-emergency-v2.yml config -q
+            echo "✅ ZooKeeper V2 config válida"
+          else
+            echo "❌ docker-compose-emergency-v2.yml não encontrado"
+            exit 1
+          fi
+
+      - name: 📋 Report V2 Status
+        run: |
+          echo "📊 FASE 1 V2 - ZOOKEEPER VALIDATION"
+          echo "=================================="
+          echo "✅ Azure OIDC: Funcionando"
+          echo "✅ Docker Compose V2: Válido"
+          echo "✅ Emergency Config: Disponível"
+          echo ""
+          echo "🎯 PRÓXIMO PASSO: Deploy no servidor srv649924"
+          echo "⚠️ Requer runner self-hosted disponível"
