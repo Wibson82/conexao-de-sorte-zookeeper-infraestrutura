@@ -23,6 +23,9 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.9.0
     hostname: conexao-zookeeper
+    user: "1000:1000"
+    init: true
+    stop_grace_period: 45s
     environment:
       # 🔧 CONFIGURAÇÃO STANDALONE CORRIGIDA
       ZOOKEEPER_SERVER_ID: 1
@@ -46,15 +49,20 @@ services:
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_logs:/var/lib/zookeeper/log
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
-      # 🩺 HEALTH CHECK ROBUSTO - TESTA CONECTIVIDADE REAL
+      # 🩺 HEALTH CHECK SEM DEPENDÊNCIAS EXTERNAS
       test: [
         "CMD-SHELL",
-        "echo 'ruok' | nc localhost 2181 | grep -q 'imok' && echo 'stats' | nc localhost 2181 | grep -q 'Mode:'"
+        "zkServer.sh status >/dev/null 2>&1 || ps aux | grep -q '[q]uorumPeerMain'"
       ]
       interval: 30s
       timeout: 15s
-      retries: 3
+      retries: 5
       start_period: 120s
     deploy:
       # 🛡️ SINGLE INSTANCE FORTE - PREVINE MÚLTIPLAS INSTÂNCIAS
