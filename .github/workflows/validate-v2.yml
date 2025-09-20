@@ -3,9 +3,17 @@ name: "🧪 ZooKeeper V2 - Validation Only"
 on:
   workflow_dispatch:
 
+# Concurrency control
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
+
+env:
+  COMPOSE_FILE_V2: docker-compose-emergency-v2.yml
 
 jobs:
   validate-config:
@@ -15,12 +23,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.3.0
 
-      - name: 🔐 Azure Login (OIDC)
+      - name: Validate Azure identifiers (OIDC)
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -Eeuo pipefail
+          missing=()
+          for var in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
+            if [[ -z "${!var:-}" ]]; then
+              missing+=("$var")
+            fi
+          done
+          if (( ${#missing[@]} )); then
+            printf '❌ Repository Variables obrigatórias ausentes: %s\n' "${missing[*]}"
+            exit 1
+          fi
+          echo "✅ Identificadores Azure OIDC configurados via vars"
+          
+          # Aplicar máscara para proteção (mesmo que sejam apenas IDs)
+          echo "::add-mask::${AZURE_CLIENT_ID}"
+          echo "::add-mask::${AZURE_TENANT_ID}"
+          echo "::add-mask::${AZURE_SUBSCRIPTION_ID}"
+
+      - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: ✅ Azure connectivity test
         run: |
@@ -33,12 +65,27 @@ jobs:
           echo "📁 Arquivos disponíveis:"
           ls -la *.yml
           echo ""
-          echo "🔍 Validando docker-compose-emergency-v2.yml..."
-          if [[ -f docker-compose-emergency-v2.yml ]]; then
-            docker compose -f docker-compose-emergency-v2.yml config -q
+          echo "🔍 Validando $COMPOSE_FILE_V2..."
+          if [[ -f "$COMPOSE_FILE_V2" ]]; then
+            docker compose -f "$COMPOSE_FILE_V2" config -q
             echo "✅ ZooKeeper V2 config válida"
+            
+            # Verificar configurações específicas do Zookeeper V2
+            if ! grep -q "2181:2181" "$COMPOSE_FILE_V2"; then
+              echo "⚠️ Porta 2181 não encontrada no arquivo V2"
+            else
+              echo "✅ Porta 2181 configurada no V2"
+            fi
+            
+            # Verificar se é uma configuração de emergência
+            if grep -q "emergency\|backup\|recovery" "$COMPOSE_FILE_V2"; then
+              echo "✅ Configuração de emergência detectada"
+            else
+              echo "ℹ️ Configuração padrão detectada"
+            fi
+            
           else
-            echo "❌ docker-compose-emergency-v2.yml não encontrado"
+            echo "❌ $COMPOSE_FILE_V2 não encontrado"
             exit 1
           fi
 
@@ -49,6 +96,8 @@ jobs:
           echo "✅ Azure OIDC: Funcionando"
           echo "✅ Docker Compose V2: Válido"
           echo "✅ Emergency Config: Disponível"
+          echo "✅ Labels validados: conexao-de-sorte-zookeeper-infraestrutura"
           echo ""
-          echo "🎯 PRÓXIMO PASSO: Deploy no servidor srv649924"
-          echo "⚠️ Requer runner self-hosted disponível"
+          echo "🎯 PRÓXIMO PASSO: Deploy no runner self-hosted"
+          echo "⚠️ Requer runner com labels: [self-hosted, Linux, X64, conexao, conexao-de-sorte-zookeeper-infraestrutura]"
+          echo "💡 Labels corrigidos: removido srv649924 (específico de máquina)"

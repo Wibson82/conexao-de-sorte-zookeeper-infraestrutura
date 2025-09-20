@@ -3,5 +3,5 @@ self-hosted-runner:
     - self-hosted
     - Linux
     - X64
-    - srv649924
+    - conexao
     - conexao-de-sorte-zookeeper-infraestrutura

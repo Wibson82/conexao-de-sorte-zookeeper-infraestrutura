@@ -1,0 +1,312 @@
+# 📋 GUIA DE RESOLUÇÃO DE PROBLEMAS DE CI/CD PARA PROJETOS CONEXÃO DE SORTE
+
+## 🎯 OBJETIVO
+Este guia documenta os problemas comuns encontrados nos pipelines CI/CD e como resolvê-los, baseado na experiência com o projeto `conexao-de-sorte-rabbitmq-infraestrutura`.
+
+---
+
+## 🚨 PROBLEMA 1: Runner Não Encontrado ("Waiting for a runner...")
+
+### Sintomas
+- Pipeline fica travado em "Waiting for a runner..."
+- Runner está online mas não pega o job
+- Mensagem de erro sobre labels incompatíveis
+
+### Causa
+O workflow contém labels que não existem no runner self-hosted.
+
+### ✅ Solução
+
+#### Passo 1: Verificar labels do runner
+```bash
+# No servidor com o runner
+sudo ./svc.sh stop
+sudo ./svc.sh uninstall
+./config.sh remove --token SEU_TOKEN
+
+# Reconfigurar com labels corretos
+./config.sh --url https://github.com/sua-org/sua-repo --token SEU_TOKEN --labels "self-hosted,Linux,X64,conexao,NOME_DO_PROJETO"
+```
+
+#### Passo 2: Ajustar labels no workflow
+**ANTES (INCORRETO):**
+```yaml
+runs-on: [self-hosted, Linux, X64, srv649924, conexao, conexao-de-sorte-rabbitmq-infraestrutura]
+```
+
+**DEPOIS (CORRETO):**
+```yaml
+runs-on: [self-hosted, Linux, X64, conexao, conexao-de-sorte-rabbitmq-infraestrutura]
+```
+
+> ⚠️ **Importante**: Remova labels específicas de máquina como `srv649924`
+
+#### Passo 3: Atualizar actionlint.yaml
+```yaml
+self-hosted-runner:
+  labels:
+    - self-hosted
+    - Linux
+    - X64
+    - conexao
+    - conexao-de-sorte-rabbitmq-infraestrutura
+```
+
+---
+
+## 🚨 PROBLEMA 2: Referência a Outputs Inexistentes
+
+### Sintomas
+- Erro: `Unrecognized named-value: 'has_azure_creds'`
+- Step falha por referenciar output que não existe
+
+### Causa
+O workflow referencia outputs de steps que não foram definidos.
+
+### ✅ Solução
+
+#### Remover referências inválidas
+**ANTES (INCORRETO):**
+```yaml
+- name: Azure Login
+  if: steps.check_secrets.outputs.has_azure_creds == 'true'
+```
+
+**DEPOIS (CORRETO):**
+```yaml
+# Remova a condição ou substitua por uma válida
+- name: Azure Login
+  if: env.AZURE_CLIENT_ID != ''
+```
+
+---
+
+## 🚨 PROBLEMA 3: Validação de Secrets
+
+### Sintomas
+- Pipeline falha por secrets ausentes
+- Mensagem: "❌ GitHub Secrets obrigatórios ausentes"
+
+### ✅ Solução
+
+#### Implementar validação robusta
+```yaml
+- name: Validate Required Secrets
+  id: check_secrets
+  run: |
+    required_secrets=(
+      "AZURE_CLIENT_ID"
+      "AZURE_TENANT_ID"
+      "AZURE_SUBSCRIPTION_ID"
+    )
+    
+    missing=()
+    for secret in "${required_secrets[@]}"; do
+      if [[ -z "${!secret:-}" ]]; then
+        missing+=("$secret")
+      fi
+    done
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+      printf '❌ GitHub Secrets obrigatórios ausentes: %s\n' "${missing[*]}"
+      exit 1
+    fi
+    
+    echo "✅ All required secrets are present"
+```
+
+---
+
+## 🚨 PROBLEMA 4: Validação de Segurança
+
+### Sintomas
+- Falha na validação de segurança
+- Possíveis passwords hardcoded
+
+### ✅ Solução
+
+#### Implementar validação de segurança
+```yaml
+- name: Security Validation
+  run: |
+    # Verificar se não há hardcoded passwords
+    if grep -r "password.*:" docker-compose.yml | grep -v "\${" | grep -v "#" | grep -v "external:"; then
+      echo "❌ Found potential hardcoded passwords"
+      exit 1
+    else
+      echo "✅ No hardcoded passwords found"
+    fi
+```
+
+---
+
+## 📋 CHECKLIST PARA NOVOS PROJETOS
+
+### ✅ Configuração Inicial
+- [ ] Criar arquivo `.github/workflows/ci-cd.yml`
+- [ ] Criar arquivo `.github/actionlint.yaml`
+- [ ] Configurar GitHub Secrets necessários
+- [ ] Verificar labels do runner self-hosted
+
+### ✅ Validações Obrigatórias
+- [ ] Validar sintaxe do docker-compose.yml
+- [ ] Verificar ausência de hardcoded passwords
+- [ ] Validar secrets obrigatórios
+- [ ] Testar pipeline em branch de desenvolvimento
+
+### ✅ Boas Práticas
+- [ ] Usar versões fixas das actions (ex: `@v4.3.0`)
+- [ ] Implementar timeout nos jobs
+- [ ] Adicionar concurrency control
+- [ ] Usar variáveis de ambiente para valores reutilizáveis
+
+---
+
+## 🔧 TEMPLATE DE WORKFLOW CORRIGIDO
+
+```yaml
+name: "🚀 Infrastructure – CI/CD Pipeline"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  SERVICE_NAME: seu-servico-infrastructure
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.3.0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-yaml
+
+      - name: Validate Docker Compose
+        run: |
+          docker compose -f docker-compose.yml config -q
+          echo "✅ Docker Compose syntax is valid"
+
+      - name: Security Validation
+        run: |
+          if grep -r "password.*:" docker-compose.yml | grep -v "\${" | grep -v "#" | grep -v "external:"; then
+            echo "❌ Found potential hardcoded passwords"
+            exit 1
+          else
+            echo "✅ No hardcoded passwords found"
+          fi
+
+      - name: Validate Required Secrets
+        run: |
+          required_secrets=("DOCKER_REGISTRY_USER" "DOCKER_REGISTRY_PASS")
+          missing=()
+          for secret in "${required_secrets[@]}"; do
+            if [[ -z "${!secret:-}" ]]; then
+              missing+=("$secret")
+            fi
+          done
+          
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            printf '❌ GitHub Secrets obrigatórios ausentes: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.5.0
+        with:
+          name: configs
+          path: |
+            docker-compose.yml
+
+  deploy-selfhosted:
+    needs: validate-and-build
+    runs-on: [self-hosted, Linux, X64, conexao, NOME_DO_PROJETO]
+    timeout-minutes: 15
+    if: github.ref == 'refs/heads/main'
+    env:
+      DOCKER_NETWORK_NAME: conexao-network-swarm
+      STACK_NAME: conexao-seu-servico
+      COMPOSE_FILE: docker-compose.yml
+    steps:
+      - uses: actions/checkout@v4.3.0
+        with:
+          clean: true
+          fetch-depth: 1
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4.1.8
+        with:
+          name: configs
+          path: .
+
+      - name: 🚀 Deploy Stack
+        run: |
+          echo "🚀 Iniciando deploy com Docker Swarm..."
+          if docker stack ls | grep -q "$STACK_NAME"; then
+            echo "🗑️ Removendo stack existente..."
+            docker stack rm "$STACK_NAME"
+            sleep 10
+          fi
+          docker stack deploy -c "$COMPOSE_FILE" "$STACK_NAME"
+          echo "⏰ Aguardando estabilização..."
+          sleep 30
+
+      - name: ✅ Healthcheck
+        run: |
+          echo "🔍 Validando saúde do serviço..."
+          timeout=180
+          elapsed=0
+          health_passed=false
+          
+          while [ $elapsed -lt $timeout ] && [ "$health_passed" = false ]; do
+            CONTAINER=$(docker ps -q -f name="${STACK_NAME}_seu-servico" | head -1)
+            if [ -n "$CONTAINER" ]; then
+              # Adicione seu health check específico aqui
+              if docker exec "$CONTAINER" seu-comando-de-healthcheck 2>/dev/null; then
+                echo "✅ Health check passed"
+                health_passed=true
+                break
+              fi
+            fi
+            sleep 10
+            elapsed=$((elapsed + 10))
+          done
+          
+          if [ "$health_passed" = false ]; then
+            echo "⚠️ Health check não passou em $timeout segundos"
+            exit 1
+          fi
+```
+
+---
+
+## 📚 REFERÊNCIAS
+
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)
+- [Docker Swarm Deploy](https://docs.docker.com/engine/swarm/stack-deploy/)
+- [Actionlint - GitHub Action Linter](https://github.com/rhymond/actionlint)
+
+---
+
+## 📝 NOTAS DE VERSÃO
+
+**v1.0.0 - 2024-01-XX**
+- ✅ Guia inicial criado baseado na experiência com rabbitmq-infraestrutura
+- ✅ Problemas comuns documentados e solucionados
+- ✅ Template de workflow otimizado e validado
+
+**Próximas melhorias:**
+- Adicionar mais exemplos de health checks específicos por serviço
+- Criar scripts de validação automatizados
+- Documentar troubleshooting avançado
