@@ -27,18 +27,18 @@ services:
     init: true
     stop_grace_period: 45s
     environment:
-      # 🔧 CONFIGURAÇÃO STANDALONE CORRIGIDA
+      # 🔧 CONFIGURAÇÃO STANDALONE OTIMIZADA
       ZOOKEEPER_SERVER_ID: 1
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SYNC_LIMIT: 5
       ZOOKEEPER_INIT_LIMIT: 10
       ZOOKEEPER_MAX_CLIENT_CNXNS: 60
       ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT: 3
       ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
-      # 🛡️ CONFIGURAÇÃO STANDALONE EXPLÍCITA
-      ZOOKEEPER_SERVERS: server.1=conexao-zookeeper:2888:3888
-      # 🚀 PERFORMANCE E STABILIDADE
+      ZOOKEEPER_STANDALONE_ENABLED: "true"
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "*"
+      # 🚀 PERFORMANCE E ESTABILIDADE
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
     networks:
@@ -55,15 +55,15 @@ services:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      # 🩺 HEALTH CHECK SEM DEPENDÊNCIAS EXTERNAS
+      # 🩺 HEALTH CHECK UTILIZANDO O ZOOKEEPER-SHELL
       test: [
         "CMD-SHELL",
-        "zkServer.sh status >/dev/null 2>&1 || ps aux | grep -q '[q]uorumPeerMain'"
+        "zookeeper-shell localhost:2181 ls / >/tmp/zk_check 2>&1 && grep -q zookeeper /tmp/zk_check"
       ]
       interval: 30s
       timeout: 15s
       retries: 5
-      start_period: 120s
+      start_period: 90s
     deploy:
       # 🛡️ SINGLE INSTANCE FORTE - PREVINE MÚLTIPLAS INSTÂNCIAS
       replicas: 1

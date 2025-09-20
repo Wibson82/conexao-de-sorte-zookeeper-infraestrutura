@@ -206,20 +206,14 @@ jobs:
             if [ -n "$zk_container" ]; then
               echo "🔍 Testando health check do Zookeeper... ($elapsed/$timeout segundos)"
 
-              if docker exec "$zk_container" zkServer.sh status >/dev/null 2>&1; then
-                echo "✅ zkServer.sh status retornou sucesso"
+              if docker exec "$zk_container" zookeeper-shell localhost:2181 ls / 2>/dev/null | grep -q "zookeeper"; then
+                echo "✅ zookeeper-shell respondeu corretamente"
                 health_passed=true
                 break
               fi
 
               if docker exec "$zk_container" ss -tuln 2>/dev/null | grep -q ":2181"; then
                 echo "✅ Porta 2181 ativa dentro do container"
-                health_passed=true
-                break
-              fi
-
-              if docker exec "$zk_container" /opt/zookeeper/bin/zkCli.sh ls / 2>/dev/null | grep -q "zookeeper"; then
-                echo "✅ zkCli.sh conectou com sucesso"
                 health_passed=true
                 break
               fi
