@@ -21,7 +21,7 @@ services:
   # 🔧 ZOOKEEPER - Kafka Coordination
   # ============================================================================
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.9.0
+    image: confluentinc/cp-zookeeper:7.9.1
     hostname: conexao-zookeeper
     user: "1000:1000"
     init: true
