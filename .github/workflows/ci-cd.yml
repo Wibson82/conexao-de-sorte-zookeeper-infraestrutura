@@ -94,11 +94,13 @@ jobs:
       - name: Validate Zookeeper Configuration
         run: |
           set -Eeuo pipefail
-          # Verificar se as portas do Zookeeper estão configuradas
-          if ! grep -q "2181:2181" docker-compose.yml; then
-            echo "❌ Zookeeper client port (2181) não configurada"
+          
+          # Verificar se a porta client está configurada como variável de ambiente (Docker Swarm mode)
+          if ! grep -q "ZOOKEEPER_CLIENT_PORT.*2181" docker-compose.yml; then
+            echo "❌ ZOOKEEPER_CLIENT_PORT (2181) não configurada como variável de ambiente"
             exit 1
           fi
+          echo "✅ ZOOKEEPER_CLIENT_PORT configurada como variável de ambiente"
 
           # Verificar se há configurações de ambiente Zookeeper
           if ! grep -q "ZOOKEEPER_" docker-compose.yml; then
@@ -114,7 +116,12 @@ jobs:
             echo "✅ Volume persistente zookeeper_data configurado"
           fi
 
-          echo "✅ Configuração Zookeeper validada"
+          # Verificar se é uma configuração Docker Swarm (sem port mapping explícito)
+          if grep -q "deploy:" docker-compose.yml && grep -q "replicas:" docker-compose.yml; then
+            echo "✅ Configuração Docker Swarm detectada - portas gerenciadas pelo serviço"
+          fi
+
+          echo "✅ Configuração Zookeeper validada para Docker Swarm"
 
       - name: Security scan (comprehensive)
         run: |
