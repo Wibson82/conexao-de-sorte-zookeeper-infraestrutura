@@ -23,11 +23,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.3.0
 
+      - name: Load secrets to environment
+        id: load-secrets
+        run: |
+          # Carregar segredos para variáveis de ambiente que podem ser usadas em condicionais
+          echo "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+          echo "AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_ENV
+          echo "✅ Segredos carregados para variáveis de ambiente"
+
       - name: Validate Azure identifiers (OIDC)
         env:
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           set -Eeuo pipefail
           missing=()
@@ -37,10 +46,10 @@ jobs:
             fi
           done
           if (( ${#missing[@]} )); then
-            printf '❌ Repository Variables obrigatórias ausentes: %s\n' "${missing[*]}"
+            printf '❌ Repository Secrets obrigatórias ausentes: %s\n' "${missing[*]}"
             exit 1
           fi
-          echo "✅ Identificadores Azure OIDC configurados via vars"
+          echo "✅ Identificadores Azure OIDC configurados via secrets"
           
           # Aplicar máscara para proteção (mesmo que sejam apenas IDs)
           echo "::add-mask::${AZURE_CLIENT_ID}"
@@ -50,9 +59,9 @@ jobs:
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: ✅ Azure connectivity test
         run: |

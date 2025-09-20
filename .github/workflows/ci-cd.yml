@@ -36,9 +36,9 @@ jobs:
 
       - name: Validate Azure identifiers (OIDC)
         env:
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_KEYVAULT_NAME: ${{ vars.AZURE_KEYVAULT_NAME }}
           AZURE_KEYVAULT_ENDPOINT: ${{ vars.AZURE_KEYVAULT_ENDPOINT }}
         run: |
@@ -50,16 +50,16 @@ jobs:
             fi
           done
           if (( ${#missing[@]} )); then
-            printf '❌ Repository Variables obrigatórias ausentes: %s\n' "${missing[*]}"
+            printf '❌ Repository Secrets obrigatórias ausentes: %s\n' "${missing[*]}"
             exit 1
           fi
-          echo "✅ Identificadores Azure OIDC configurados via vars"
-          
+          echo "✅ Identificadores Azure OIDC configurados via secrets"
+
           # Aplicar máscara para proteção (mesmo que sejam apenas IDs)
           echo "::add-mask::${AZURE_CLIENT_ID}"
           echo "::add-mask::${AZURE_TENANT_ID}"
           echo "::add-mask::${AZURE_SUBSCRIPTION_ID}"
-          
+
           if [[ -n "${AZURE_KEYVAULT_NAME:-}" ]]; then
             echo "ℹ️ Key Vault configurado: ${AZURE_KEYVAULT_NAME}"
             echo "::add-mask::${AZURE_KEYVAULT_NAME}"
@@ -90,7 +90,7 @@ jobs:
           set -Eeuo pipefail
           docker compose -f docker-compose.yml config -q
           echo "✅ docker-compose.yml válido"
-          
+
       - name: Validate Zookeeper Configuration
         run: |
           set -Eeuo pipefail
@@ -99,45 +99,45 @@ jobs:
             echo "❌ Zookeeper client port (2181) não configurada"
             exit 1
           fi
-          
+
           # Verificar se há configurações de ambiente Zookeeper
           if ! grep -q "ZOOKEEPER_" docker-compose.yml; then
             echo "⚠️ Configurações ZOOKEEPER_ não encontradas (pode ser normal para configuração básica)"
           else
             echo "✅ Configurações ZOOKEEPER_ encontradas"
           fi
-          
+
           # Verificar se há volumes persistentes configurados
           if ! grep -q "zookeeper_data" docker-compose.yml; then
             echo "⚠️ Volume persistente zookeeper_data não configurado"
           else
             echo "✅ Volume persistente zookeeper_data configurado"
           fi
-          
+
           echo "✅ Configuração Zookeeper validada"
 
       - name: Security scan (comprehensive)
         run: |
           set -Eeuo pipefail
-          
+
           # Verificar passwords hardcoded
           if grep -R "password[[:space:]]*:[[:space:]]*['\"]" --include="*.yml" docker-compose.yml 2>/dev/null | grep -v '\${'; then
             echo "⚠️ Possível credencial hardcoded detectada"
             exit 1
           fi
-          
+
           # Verificar tokens e secrets
           if grep -E "(token|secret|key|password)[[:space:]]*:[[:space:]]*['\"][a-zA-Z0-9]{16,}" docker-compose.yml 2>/dev/null | grep -v '\${'; then
             echo "⚠️ Possível token/secret hardcoded detectado"
             exit 1
           fi
-          
+
           # Verificar variáveis de ambiente sensíveis não mapeadas
           if grep -E "(AZURE_|AWS_|GCP_|DATABASE_)[A-Z_]*[[:space:]]*:" docker-compose.yml 2>/dev/null | grep -v '\${'; then
             echo "⚠️ Variável de ambiente sensível pode estar hardcoded"
             exit 1
           fi
-          
+
           echo "✅ Nenhum segredo hardcode identificado"
 
   deploy:
@@ -161,6 +161,17 @@ jobs:
           fetch-depth: 1
           clean: true
 
+      - name: Load secrets to environment
+        id: load-secrets
+        run: |
+          # Carregar segredos para variáveis de ambiente que podem ser usadas em condicionais
+          echo "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }}" >> $GITHUB_ENV
+          echo "AZURE_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID }}" >> $GITHUB_ENV
+          echo "AZURE_KEYVAULT_NAME=${{ secrets.AZURE_KEYVAULT_NAME }}" >> $GITHUB_ENV
+          echo "HAS_AZURE_KEYVAULT_NAME=$([[ -n "${{ secrets.AZURE_KEYVAULT_NAME }}" ]] && echo 'true' || echo 'false')" >> $GITHUB_ENV
+          echo "✅ Segredos carregados para variáveis de ambiente"
+
       - name: Pre-deploy environment check
         run: |
           echo '🔍 Verificando ambiente antes do deploy...'
@@ -169,32 +180,32 @@ jobs:
           echo "Workflow: ${{ github.workflow }}"
           echo "Run ID: ${{ github.run_id }}"
           echo "Ref: ${{ github.ref }}"
-          
+
           # Verificar se há alguma variável de ambiente suspeita
           echo '🔍 Verificando variáveis de ambiente que podem conter segredos...'
           env | grep -i -E "(keyvault|secret|token|password)" || echo "Nenhuma variável suspeita encontrada"
-          
+
           echo '✅ Verificação de ambiente concluída'
 
       - name: Pre-deployment validation
         run: |
           set -Eeuo pipefail
           echo "🔍 Validando ambiente antes do deploy..."
-          
+
           # Verificar se Docker está rodando
           if ! docker info >/dev/null 2>&1; then
             echo "❌ Docker não está rodando ou não está acessível"
             exit 1
           fi
           echo "✅ Docker está rodando"
-          
+
           # Verificar modo Swarm
           if ! docker info 2>/dev/null | grep -q "Swarm: active"; then
             echo "⚠️ Docker Swarm não está ativo (pode ser necessário iniciar)"
           else
             echo "✅ Docker Swarm está ativo"
           fi
-          
+
           # Verificar espaço em disco
           available_space=$(df -h . | awk 'NR==2 {print $4}' | sed 's/G//')
           if (( $(echo "$available_space < 2" | bc -l) )); then
@@ -202,7 +213,7 @@ jobs:
           else
             echo "✅ Espaço em disco suficiente: ${available_space}GB disponível"
           fi
-          
+
           # Verificar memória disponível
           available_mem=$(free -g | awk 'NR==2{printf "%.0f", $7}')
           if [[ $available_mem -lt 2 ]]; then
@@ -214,12 +225,12 @@ jobs:
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Confirm Key Vault usage
-        if: vars.AZURE_KEYVAULT_NAME != ''
+        if: env.HAS_AZURE_KEYVAULT_NAME == 'true'
         run: |
           echo 'ℹ️ Key Vault configurado mas não utilizado (Zookeeper não requer segredos externos)'
           echo '✅ Seguindo política de mínimo necessário - nenhum segredo do Key Vault é requerido'
@@ -281,23 +292,23 @@ jobs:
               if docker logs "$container" 2>/dev/null | grep -q "binding to port"; then
                 echo "✅ Logs indicam inicialização"
               fi
-              
+
               # Verificar se a porta 2181 está ativa
               if docker exec "$container" ss -tuln 2>/dev/null | grep -q ":2181 "; then
                 echo "✅ Porta 2181 ativa"
               fi
-              
+
               # Verificar se o processo Zookeeper está rodando
               if docker exec "$container" ps aux 2>/dev/null | grep -q "[q]uorumPeerMain"; then
                 echo "✅ Processo Zookeeper ativo"
               fi
-              
+
               # Testar conectividade real com zkCli
               if docker exec "$container" /opt/zookeeper/bin/zkCli.sh ls / 2>/dev/null | grep -q "zookeeper"; then
                 echo "✅ Zookeeper respondendo a comandos"
                 exit 0
               fi
-              
+
               # Teste alternativo com nc se zkCli não estiver disponível
               if docker exec "$container" nc -z localhost 2181 2>/dev/null; then
                 echo "✅ Conexão TCP na porta 2181 funcionando"
