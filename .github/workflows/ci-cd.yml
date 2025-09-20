@@ -206,6 +206,12 @@ jobs:
             if [ -n "$zk_container" ]; then
               echo "🔍 Testando health check do Zookeeper... ($elapsed/$timeout segundos)"
 
+              if docker exec "$zk_container" bash -c "echo ruok | nc -w 3 localhost 2181" 2>/dev/null | grep -q "imok"; then
+                echo "✅ Comando ruok respondeu 'imok'"
+                health_passed=true
+                break
+              fi
+
               if docker exec "$zk_container" zookeeper-shell localhost:2181 ls / 2>/dev/null | grep -q "zookeeper"; then
                 echo "✅ zookeeper-shell respondeu corretamente"
                 health_passed=true

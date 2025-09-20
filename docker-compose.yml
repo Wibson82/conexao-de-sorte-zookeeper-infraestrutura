@@ -55,10 +55,10 @@ services:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      # 🩺 HEALTH CHECK UTILIZANDO O ZOOKEEPER-SHELL
+      # 🩺 HEALTH CHECK UTILIZANDO COMANDO RUOK
       test: [
         "CMD-SHELL",
-        "zookeeper-shell localhost:2181 ls / >/tmp/zk_check 2>&1 && grep -q zookeeper /tmp/zk_check"
+        "(echo ruok | nc -w 3 localhost 2181 | grep -q imok) || (zookeeper-shell localhost:2181 ls / >/tmp/zk_check 2>&1 && grep -q zookeeper /tmp/zk_check)"
       ]
       interval: 30s
       timeout: 15s
