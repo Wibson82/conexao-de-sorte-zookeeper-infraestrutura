@@ -285,29 +285,29 @@ jobs:
 
             if [[ -n "$response" ]]; then
               status=$(printf '%s' "$response" | python3 - <<'PY' 2>/dev/null || true
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    print(data.get("status", ""))
-except Exception:
-    pass
-PY
-)
-              status=${status//$'\n'/}
-              echo "📊 Status reportado: ${status:-indefinido}"
+            import json, sys
+            try:
+                data = json.load(sys.stdin)
+                print(data.get("status", ""))
+            except Exception:
+                pass
+            PY
+            )
+                          status=${status//$'\n'/}
+                          echo "📊 Status reportado: ${status:-indefinido}"
 
-              if [[ "$status" == "healthy" ]]; then
-                echo "✅ Traefik confirmou Zookeeper como healthy"
-                exit 0
-              fi
-            else
-              echo "⚠️ Traefik sem resposta nesta tentativa"
-            fi
+                          if [[ "$status" == "healthy" ]]; then
+                            echo "✅ Traefik confirmou Zookeeper como healthy"
+                            exit 0
+                          fi
+                        else
+                          echo "⚠️ Traefik sem resposta nesta tentativa"
+                        fi
 
-            sleep "$INTERVAL"
-            elapsed=$((elapsed + INTERVAL))
-          done
+                        sleep "$INTERVAL"
+                        elapsed=$((elapsed + INTERVAL))
+                      done
 
-          echo "❌ Traefik nao confirmou Zookeeper como healthy apos ${TIMEOUT_TOTAL}s"
-          echo "📝 Ultima resposta recebida: ${last_response:-<sem resposta>}"
-          exit 1
+                      echo "❌ Traefik nao confirmou Zookeeper como healthy apos ${TIMEOUT_TOTAL}s"
+                      echo "📝 Ultima resposta recebida: ${last_response:-<sem resposta>}"
+                      exit 1
