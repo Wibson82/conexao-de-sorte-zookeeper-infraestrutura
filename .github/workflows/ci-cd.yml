@@ -1,4 +1,4 @@
-name: "🚀 Zookeeper Infrastructure – CI/CD Pipeline"
+name: "🚀 Zookeeper Infrastructure - CI/CD Pipeline"
 
 on:
   push:
