@@ -41,6 +41,19 @@ services:
       # 🚀 PERFORMANCE E ESTABILIDADE
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+      # 🔐 SECURITY CONFIGURATION
+      ZOOKEEPER_AUTH_PROVIDER_X509: "org.apache.zookeeper.server.auth.X509AuthenticationProvider"
+      ZOOKEEPER_QUORUM_AUTH_ENABLE_SASL: "true"
+      ZOOKEEPER_QUORUM_AUTH_LEARNER_REQUIRE_SASL: "true"
+      ZOOKEEPER_QUORUM_AUTH_SERVER_REQUIRE_SASL: "true"
+      # Secrets via Docker Secrets
+      ZOOKEEPER_JAAS_CONFIG_FILE: "/run/secrets/ZOOKEEPER_JAAS_CONFIG"
+      ZOOKEEPER_ADMIN_PASSWORD_FILE: "/run/secrets/ZOOKEEPER_ADMIN_PASSWORD"
+      ZOOKEEPER_DIGEST_AUTH_SUPER_USER_FILE: "/run/secrets/ZOOKEEPER_SUPER_USER"
+    secrets:
+      - ZOOKEEPER_JAAS_CONFIG
+      - ZOOKEEPER_ADMIN_PASSWORD
+      - ZOOKEEPER_SUPER_USER
     networks:
       conexao-network-swarm:
         aliases:
@@ -96,6 +109,33 @@ services:
         delay: 30s
         failure_action: pause
         monitor: 60s
+
+    # ==========================================================================
+    # 🏷️ LABELS - ZOOKEEPER METADATA
+    # ==========================================================================
+    labels:
+      # Metadata do serviço
+      - "org.opencontainers.image.title=Conexão de Sorte - Zookeeper"
+      - "org.opencontainers.image.description=Coordenação e consensus para Kafka"
+      - "org.opencontainers.image.version=7.9.1"
+      - "microservice.type=coordination"
+      - "microservice.category=infrastructure"
+      - "microservice.depends-on=none"
+      - "microservice.required-by=kafka"
+
+# ============================================================================
+# 🔐 SECRETS EXTERNOS (Azure Key Vault)
+# ============================================================================
+secrets:
+  ZOOKEEPER_JAAS_CONFIG:
+    external: true
+    name: ZOOKEEPER_JAAS_CONFIG
+  ZOOKEEPER_ADMIN_PASSWORD:
+    external: true
+    name: ZOOKEEPER_ADMIN_PASSWORD
+  ZOOKEEPER_SUPER_USER:
+    external: true
+    name: ZOOKEEPER_SUPER_USER
 
 # ============================================================================
 # 📦 VOLUMES EXTERNOS
