@@ -311,3 +311,48 @@ jobs:
                       echo "❌ Traefik nao confirmou Zookeeper como healthy apos ${TIMEOUT_TOTAL}s"
                       echo "📝 Ultima resposta recebida: ${last_response:-<sem resposta>}"
                       exit 1
+
+      - name: 🏥 Verificar Deploy no Runner (Local Container Check)
+        run: |
+          echo "🔍 Verificando se o deploy foi bem-sucedido no runner..."
+          # Verificar se o container está rodando e healthy
+          timeout=180
+          interval=10
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            echo "🔍 Verificando containers do Zookeeper (${elapsed}/${timeout}s)..."
+            # Buscar container do zookeeper que está rodando
+            zookeeper_container=$(docker ps --filter "name=conexao-zookeeper" --filter "status=running" --format "{{.Names}}\t{{.Status}}" | head -1)
+            if [[ -n "$zookeeper_container" ]]; then
+              echo "📦 Container encontrado: $zookeeper_container"
+              # Verificar se tem health status
+              container_name=$(echo "$zookeeper_container" | cut -f1)
+              health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container_name" 2>/dev/null || echo "no-health-check")
+              if [[ "$health_status" == "healthy" ]]; then
+                echo "✅ Container do Zookeeper está healthy no runner"
+                echo "🎉 Deploy confirmado com sucesso!"
+                exit 0
+              elif [[ "$health_status" == "no-health-check" ]]; then
+                echo "⚠️ Container sem health check configurado, verificando se está rodando..."
+                # Se não tem health check, verificar se o container está rodando há pelo menos 30s
+                uptime=$(docker inspect --format='{{.State.StartedAt}}' "$container_name" | xargs -I {} date -d {} +%s)
+                current_time=$(date +%s)
+                running_time=$((current_time - uptime))
+                if [ $running_time -gt 30 ]; then
+                  echo "✅ Container rodando há ${running_time}s - considerado estável"
+                  echo "🎉 Deploy confirmado com sucesso!"
+                  exit 0
+                fi
+              else
+                echo "⚠️ Container health status: $health_status"
+              fi
+            else
+              echo "⚠️ Nenhum container do Zookeeper encontrado rodando"
+            fi
+            sleep "$interval"
+            elapsed=$((elapsed + interval))
+          done
+          echo "❌ Timeout: Zookeeper não ficou healthy dentro do tempo esperado"
+          echo "🔍 Containers atuais:"
+          docker ps --filter "name=conexao-zookeeper"
+          exit 1
