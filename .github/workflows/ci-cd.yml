@@ -139,11 +139,56 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: ⚠️ Azure Login opcional
-        if: ${{ needs.validate-and-build.outputs.has_azure_creds == 'true' && steps.azure_login.outcome == 'failure' }}
+      - name: 🔐 Get secrets from Azure Key Vault (via AZ CLI)
+        shell: bash
         run: |
-          echo "⚠️ Azure Login falhou (OIDC não configurado para este repositório)."
-          echo "ℹ️ Continuando deploy sem autenticação Azure, pois o Zookeeper não consome segredos."
+          echo "Fetching secrets from Azure Key Vault using Azure CLI..."
+          SECRETS_LIST=(
+            "conexao-de-sorte-zookeeper-client-port"
+          )
+          for secret_name in "${SECRETS_LIST[@]}"; do
+            echo "Fetching secret: $secret_name"
+            secret_value=$(az keyvault secret show --vault-name "${{ secrets.AZURE_KEYVAULT_NAME }}" --name "$secret_name" --query "value" -o tsv 2>/dev/null)
+            if [[ -n "$secret_value" ]]; then
+              echo "::add-mask::$secret_value"
+              env_var_name=$(echo "$secret_name" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
+              echo "${env_var_name}=${secret_value}" >> $GITHUB_ENV
+              echo "Secret '$secret_name' fetched and set as environment variable '${env_var_name}'."
+            else
+              echo "Warning: Secret '$secret_name' not found in Azure Key Vault."
+            fi
+          done
+
+      - name: 🔐 Create Docker Secrets for Zookeeper
+        run: |
+          echo "Creating Docker secrets for Zookeeper..."
+
+          # Função para criar Docker Secret apenas se não existir
+          create_docker_secret_if_not_exists() {
+            local secret_name="$1"
+            local secret_value="$2"
+
+            if docker secret ls --format "{{.Name}}" | grep -q "^${secret_name}$"; then
+              echo "ℹ️ Docker secret ${secret_name} já existe - reutilizando"
+            else
+              printf "$secret_value" | docker secret create "$secret_name" -
+              echo "✅ Docker secret ${secret_name} criado"
+            fi
+          }
+
+          # Criar secrets necessários para o Zookeeper
+          create_docker_secret_if_not_exists "ZOOKEEPER_ADMIN_PASSWORD" "zookeeper-admin-2024!"
+          create_docker_secret_if_not_exists "ZOOKEEPER_SUPER_USER" "super:zookeeper-super-2024!"
+
+          # JAAS Config para autenticação
+          jaas_config='Server {
+              org.apache.zookeeper.server.auth.DigestLoginModule required
+              user_super="zookeeper-super-2024!"
+              user_admin="zookeeper-admin-2024!";
+          };'
+          create_docker_secret_if_not_exists "ZOOKEEPER_JAAS_CONFIG" "$jaas_config"
+
+          echo "Docker secrets for Zookeeper created successfully."
 
       - name: 🔴 Deploy Zookeeper Stack (Swarm-Only)
         env:
