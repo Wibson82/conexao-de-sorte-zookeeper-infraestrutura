@@ -38,8 +38,8 @@ services:
       ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: 24
       ZOOKEEPER_STANDALONE_ENABLED: "true"
       ZOOKEEPER_4LW_COMMANDS_WHITELIST: "*"
-      # 🚀 PERFORMANCE E ESTABILIDADE - OTIMIZADO HOSTINGER KVM 2
-      KAFKA_HEAP_OPTS: "-Xmx300m -Xms150m"
+      # 🚀 PERFORMANCE E ESTABILIDADE
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
       # 🔐 CONFIGURAÇÃO SIMPLIFICADA PARA DESENVOLVIMENTO
       ZOOKEEPER_LOG4J_LOGGERS: "org.apache.zookeeper=WARN"
@@ -57,12 +57,15 @@ services:
         max-size: "10m"
         max-file: "5"
     healthcheck:
-      # 🩺 HEALTH CHECK SIMPLIFICADO PARA HOSTINGER KVM 2
-      test: ["CMD-SHELL", "echo ruok | nc -w 5 localhost 2181 | grep -q imok || exit 1"]
-      interval: 60s        # Aumentado de 30s
-      timeout: 20s         # Aumentado de 15s
-      retries: 5           # Mantido
-      start_period: 120s   # Aumentado de 90s
+      # 🩺 HEALTH CHECK UTILIZANDO COMANDO RUOK
+      test: [
+        "CMD-SHELL",
+        "(echo ruok | nc -w 3 localhost 2181 | grep -q imok) || (zookeeper-shell localhost:2181 ls / >/tmp/zk_check 2>&1 && grep -q zookeeper /tmp/zk_check)"
+      ]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
     deploy:
       # 🛡️ SINGLE INSTANCE FORTE - PREVINE MÚLTIPLAS INSTÂNCIAS
       replicas: 1
@@ -78,12 +81,12 @@ services:
         window: 600s
       resources:
         limits:
-          # 🚀 RESOURCES OTIMIZADOS PARA HOSTINGER KVM 2
-          memory: 400m
-          cpus: '0.3'
+          # 🚀 RESOURCES ADEQUADOS PARA ZOOKEEPER
+          memory: 1G
+          cpus: '0.5'
         reservations:
-          memory: 200m
-          cpus: '0.1'
+          memory: 512M
+          cpus: '0.25'
       update_config:
         parallelism: 1
         delay: 30s
