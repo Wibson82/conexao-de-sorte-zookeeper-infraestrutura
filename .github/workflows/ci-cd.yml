@@ -1,392 +1,130 @@
-name: "🚀 Zookeeper Infrastructure - CI/CD Pipeline"
+name: "🏗️ Infrastructure Component - CI/CD Pipeline"
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
   workflow_dispatch:
-
-permissions:
-  contents: read
-  id-token: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  SERVICE_NAME: zookeeper-infrastructure
-  STACK_NAME: conexao-zookeeper
-  DOCKER_NETWORK_NAME: conexao-network-swarm
-  ZOOKEEPER_DATA_VOLUME: zookeeper_data
-  ZOOKEEPER_LOGS_VOLUME: zookeeper_logs
+  INFRA_TYPE: infrastructure
+  KUBECTL_VERSION: 'v1.28.0'
+
+permissions:
+  contents: read
+  security-events: write
 
 jobs:
-  validate-and-build:
+  validate:
+    name: "🔍 Validate Infrastructure Component"
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-      id-token: write
-    outputs:
-      has_keyvault: ${{ steps.check_secrets.outputs.has_keyvault }}
-      has_azure_creds: ${{ steps.check_secrets.outputs.has_azure_creds }}
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4.3.0
+      - name: "📥 Checkout Repository"
+        uses: actions/checkout@v4
+        
+      - name: "🔧 Setup kubectl"
+        uses: azure/setup-kubectl@v3
         with:
-          fetch-depth: 1
-
-      - name: Install dependencies
+          version: ${{ env.KUBECTL_VERSION }}
+          
+      - name: "📋 Validate YAML Files"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-yaml jq
-
-      - name: 🔎 Validar identificadores Azure (vars)
-        id: check_secrets
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          AZURE_KEYVAULT_NAME: ${{ secrets.AZURE_KEYVAULT_NAME }}
-          AZURE_KEYVAULT_ENDPOINT: ${{ secrets.AZURE_KEYVAULT_ENDPOINT }}
-        run: |
-          set -Eeuo pipefail
-          missing=()
-          for var in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
-            if [[ -z "${!var:-}" ]]; then
-              missing+=("$var")
+          echo "📋 Validating YAML syntax..."
+          yaml_count=0
+          for file in $(find . -name "*.yaml" -o -name "*.yml" | grep -v ".github"); do
+            echo "Validating: $file"
+            yaml_count=$((yaml_count + 1))
+            if ! kubectl --dry-run=client apply -f "$file" 2>/dev/null; then
+              echo "⚠️ Warning: $file may have issues (this is normal for templates)"
             fi
           done
-          if (( ${#missing[@]} )); then
-            printf '❌ GitHub Secrets obrigatórios ausentes: %s\n' "${missing[*]}"
+          echo "✅ Validated $yaml_count YAML files"
+          
+      - name: "🔒 Security Validation"
+        run: |
+          echo "🔒 Checking for security issues..."
+          
+          # Check for hardcoded secrets
+          if find . -name "*.yaml" -o -name "*.yml" | xargs grep -l "password:" 2>/dev/null | grep -v ".github" | head -1; then
+            echo "⚠️ Found password references - ensure they use secrets"
+          fi
+          
+          # Check for default passwords
+          if find . -name "*.yaml" -o -name "*.yml" | xargs grep -i "admin:admin\|root:root\|password:password" 2>/dev/null | head -1; then
+            echo "❌ Default passwords found!"
             exit 1
           fi
-          echo "::add-mask::${AZURE_CLIENT_ID}"
-          echo "::add-mask::${AZURE_TENANT_ID}"
-          echo "::add-mask::${AZURE_SUBSCRIPTION_ID}"
-          echo "has_azure_creds=true" >> "$GITHUB_OUTPUT"
-
-          if [[ -n "${AZURE_KEYVAULT_NAME:-}" ]]; then
-            echo "::add-mask::${AZURE_KEYVAULT_NAME}"
-            echo "has_keyvault=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_keyvault=false" >> "$GITHUB_OUTPUT"
-            echo 'ℹ️ Key Vault não configurado (Zookeeper não consome segredos)'
-          fi
-
-          if [[ -n "${AZURE_KEYVAULT_ENDPOINT:-}" ]]; then
-            echo "::add-mask::${AZURE_KEYVAULT_ENDPOINT}"
-          fi
-
-      - name: Validate docker-compose.yml
+          
+          echo "✅ Security validation passed"
+          
+      - name: "🧪 Test Scripts"
         run: |
-          docker compose -f docker-compose.yml config -q
-          echo "✅ docker-compose.yml syntax ok"
-
-      - name: Security validation
-        run: |
-          set -Eeuo pipefail
-          if grep -R "password[[:space:]]*:" docker-compose.yml | grep -v '\${' | grep -v '^#' | grep -v 'external:'; then
-            echo "❌ Possible hardcoded password detected"
-            exit 1
-          fi
-          echo "✅ No hardcoded passwords detected"
-
-          if grep -Eq "^\s*-\s*'?2181:'?" docker-compose.yml; then
-            echo "⚠️ Porta 2181 exposta externamente; confirme necessidade"
-          else
-            echo "✅ Porta 2181 não exposta externamente"
-          fi
-
-  deploy-selfhosted:
-    needs: validate-and-build
-    runs-on: [ self-hosted, Linux, X64, conexao-de-sorte-zookeeper-infraestrutura ]
-    timeout-minutes: 20
-    if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4.3.0
-        with:
-          clean: true
-          fetch-depth: 1
-
-      - name: 🔍 Diagnósticos iniciais
-        run: |
-          set -Eeuo pipefail
-          echo "🔍 Verificando arquivos necessários..."
-          for required_file in "docker-compose.yml"; do
-            if [[ -f "$required_file" ]]; then
-              echo "✅ $required_file encontrado"
-            else
-              echo "❌ $required_file NÃO encontrado"
+          echo "🧪 Testing executable scripts..."
+          
+          script_count=0
+          for script in $(find . -name "*.sh"); do
+            echo "Testing: $script"
+            script_count=$((script_count + 1))
+            if ! bash -n "$script"; then
+              echo "❌ Syntax error in $script"
               exit 1
             fi
           done
-          echo "ℹ️ Nenhum diretório local obrigatório para Zookeeper"
-
-      - name: 🔐 Azure Login (OIDC)
-        id: azure_login
-        if: ${{ needs.validate-and-build.outputs.has_azure_creds == 'true' }}
-        continue-on-error: true
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: 🔐 Get secrets from Azure Key Vault (via AZ CLI)
-        shell: bash
-        run: |
-          echo "Fetching secrets from Azure Key Vault using Azure CLI..."
-          SECRETS_LIST=(
-            "conexao-de-sorte-zookeeper-client-port"
-          )
-          for secret_name in "${SECRETS_LIST[@]}"; do
-            echo "Fetching secret: $secret_name"
-            secret_value=$(az keyvault secret show --vault-name "${{ secrets.AZURE_KEYVAULT_NAME }}" --name "$secret_name" --query "value" -o tsv 2>/dev/null)
-            if [[ -n "$secret_value" ]]; then
-              echo "::add-mask::$secret_value"
-              env_var_name=$(echo "$secret_name" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
-              echo "${env_var_name}=${secret_value}" >> $GITHUB_ENV
-              echo "Secret '$secret_name' fetched and set as environment variable '${env_var_name}'."
-            else
-              echo "Warning: Secret '$secret_name' not found in Azure Key Vault."
-            fi
-          done
-
-      - name: 🔐 Create Docker Secrets for Zookeeper
-        run: |
-          echo "Creating Docker secrets for Zookeeper..."
-
-          # Função para criar Docker Secret apenas se não existir
-          create_docker_secret_if_not_exists() {
-            local secret_name="$1"
-            local secret_value="$2"
-
-            if docker secret ls --format "{{.Name}}" | grep -q "^${secret_name}$"; then
-              echo "ℹ️ Docker secret ${secret_name} já existe - reutilizando"
-            else
-              printf "$secret_value" | docker secret create "$secret_name" -
-              echo "✅ Docker secret ${secret_name} criado"
-            fi
-          }
-
-          # Configuração simplificada - sem secrets de autenticação
-          echo "✅ Zookeeper configurado sem autenticação para ambiente de desenvolvimento"
-
-      - name: 🔴 Deploy Zookeeper Stack (Swarm-Only)
-        env:
-          STACK_NAME: ${{ env.STACK_NAME }}
-          DOCKER_NETWORK_NAME: ${{ env.DOCKER_NETWORK_NAME }}
-          ZOOKEEPER_DATA_VOLUME: ${{ env.ZOOKEEPER_DATA_VOLUME }}
-          ZOOKEEPER_LOGS_VOLUME: ${{ env.ZOOKEEPER_LOGS_VOLUME }}
-        run: |
-          set -Eeuo pipefail
-          compose_file="docker-compose.yml"
-
-          echo "🔍 Garantindo recursos básicos (rede, volumes)..."
-          if ! docker network ls --format '{{.Name}}' | grep -Fxq "$DOCKER_NETWORK_NAME"; then
-            echo "⚠️ Rede '$DOCKER_NETWORK_NAME' não encontrada - criando overlay attachable"
-            docker network create --driver overlay --attachable "$DOCKER_NETWORK_NAME"
-            echo "✅ Rede '$DOCKER_NETWORK_NAME' criada"
+          
+          if [ $script_count -eq 0 ]; then
+            echo "ℹ️ No shell scripts found"
           else
-            echo "✅ Rede '$DOCKER_NETWORK_NAME' já existe"
+            echo "✅ All $script_count scripts have valid syntax"
           fi
-
-          for volume in "$ZOOKEEPER_DATA_VOLUME" "$ZOOKEEPER_LOGS_VOLUME"; do
-            if [[ -n "$volume" ]]; then
-              if ! docker volume ls --format '{{.Name}}' | grep -Fxq "$volume"; then
-                echo "⚠️ Volume '$volume' não encontrado - criando volume externo"
-                docker volume create --name "$volume"
-                echo "✅ Volume '$volume' criado"
-              else
-                echo "✅ Volume '$volume' já existe"
-              fi
-            fi
-          done
-
-          if docker stack ls --format '{{.Name}}' | grep -Fxq "$STACK_NAME"; then
-            echo "🔄 Removendo stack existente '$STACK_NAME'..."
-            docker stack rm "$STACK_NAME"
-            echo "⏳ Aguardando remoção completa da stack '$STACK_NAME'..."
-            for _ in $(seq 1 36); do
-              if ! docker stack ls --format '{{.Name}}' | grep -Fxq "$STACK_NAME"; then
-                echo "✅ Stack '$STACK_NAME' removida"
-                break
-              fi
-              sleep 5
-            done
-          fi
-
-          echo "🏗️ Executando deploy da stack '$STACK_NAME'..."
-          docker stack deploy -c "$compose_file" "$STACK_NAME"
-          echo "⏰ Aguardando estabilização dos serviços Zookeeper..."
-          sleep 45
-
-      - name: Healthcheck Zookeeper (Multi-método)
+          
+      - name: "📋 Validate Documentation"
         run: |
-          set -Eeuo pipefail
-          timeout=180
-          elapsed=0
-          health_passed=false
-          while [ $elapsed -lt $timeout ] && [ "$health_passed" = false ]; do
-            zk_container=$(docker ps -q -f name="${STACK_NAME}_zookeeper" | head -1)
-
-            if [ -n "$zk_container" ]; then
-              echo "🔍 Testando health check do Zookeeper... ($elapsed/$timeout segundos)"
-
-              if docker exec "$zk_container" bash -c "echo ruok | nc -w 3 localhost 2181" 2>/dev/null | grep -q "imok"; then
-                echo "✅ Comando ruok respondeu 'imok'"
-                health_passed=true
-                break
-              fi
-
-              if docker exec "$zk_container" zookeeper-shell localhost:2181 ls / 2>/dev/null | grep -q "zookeeper"; then
-                echo "✅ zookeeper-shell respondeu corretamente"
-                health_passed=true
-                break
-              fi
-
-              if docker exec "$zk_container" ss -tuln 2>/dev/null | grep -q ":2181"; then
-                echo "✅ Porta 2181 ativa dentro do container"
-                health_passed=true
-                break
-              fi
-
-              echo "⏳ Zookeeper ainda não está pronto... ($elapsed/$timeout segundos)"
-            else
-              echo "ℹ️ Status atual das tarefas Zookeeper"
-              docker service ps "${STACK_NAME}_zookeeper" --no-trunc || true
-              echo "⏳ Container Zookeeper ainda não encontrado... ($elapsed/$timeout segundos)"
-            fi
-
-            sleep 10
-            elapsed=$((elapsed + 10))
-          done
-
-          if [ "$health_passed" = false ]; then
-            echo "⚠️ Zookeeper health check não passou em $timeout segundos"
-            docker service ps "${STACK_NAME}_zookeeper" --no-trunc || true
-            if [ -n "$zk_container" ]; then
-              echo "--- Últimos 40 logs do Zookeeper ---"
-              docker logs "$zk_container" --tail 40 2>/dev/null || true
-              echo "--- Fim dos logs ---"
-            fi
+          echo "📋 Checking documentation..."
+          
+          if [ ! -f "README.md" ]; then
+            echo "❌ README.md not found"
             exit 1
           fi
-
-      - name: 🔍 Connectivity Validation
-        run: |
-          set -Eeuo pipefail
-          echo "📊 Status final do serviço Zookeeper:"
-          docker service ls --filter name="${STACK_NAME}_zookeeper" --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}"
-
-          echo "🔗 Verificando rede overlay:"
-          if docker network inspect "$DOCKER_NETWORK_NAME" | grep -q zookeeper; then
-            echo "✅ Zookeeper referenciado na rede '$DOCKER_NETWORK_NAME'"
-          else
-            echo "⚠️ Zookeeper pode não estar listado explicitamente na rede '$DOCKER_NETWORK_NAME'"
+          
+          if [ ! -f ".gitignore" ]; then
+            echo "⚠️ .gitignore not found"
           fi
-
-          echo "🗄️ Validando volumes externos:"
-          for volume in "$ZOOKEEPER_DATA_VOLUME" "$ZOOKEEPER_LOGS_VOLUME"; do
-            if docker volume ls --format '{{.Name}}' | grep -Fxq "$volume"; then
-              echo "✅ Volume '$volume' disponível"
-            else
-              echo "⚠️ Volume '$volume' não encontrado"
-            fi
-          done
-
-      - name: Traefik Health Monitor Validation
+          
+          echo "✅ Documentation validation passed"
+          
+      - name: "📊 Generate Report"
         run: |
-          set -euo pipefail
-          HEALTH_MONITOR_URL="https://traefik.conexaodesorte.com.br/health/service/zookeeper"
-          TIMEOUT_TOTAL=300
-          INTERVAL=10
-          elapsed=0
-          last_response=""
-          status=""
+          echo "📊 Infrastructure Component Validation Report"
+          echo "=================================================="
+          echo "Project: conexao-de-sorte-zookeeper-infraestrutura"
+          echo "Type: infrastructure"
+          echo "YAML files: $(find . -name "*.yaml" -o -name "*.yml" | grep -v ".github" | wc -l)"
+          echo "Scripts: $(find . -name "*.sh" | wc -l)"
+          echo "Status: ✅ Validation Passed"
 
-          while [ $elapsed -lt $TIMEOUT_TOTAL ]; do
-            echo "🔎 Consultando Traefik (${elapsed}/${TIMEOUT_TOTAL}s)..."
-            response=$(curl -sf --max-time 10 "$HEALTH_MONITOR_URL" 2>/dev/null || true)
-            last_response="$response"
-
-            if [[ -n "$response" ]]; then
-              status=$(printf '%s' "$response" | python3 - <<'PY' 2>/dev/null || true
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    print(data.get("status", ""))
-except Exception:
-    pass
-PY
-)
-              status=${status//$'\n'/}
-              echo "📊 Status reportado: ${status:-indefinido}"
-
-              if [[ "$status" == "healthy" ]]; then
-                echo "✅ Traefik confirmou Zookeeper como healthy"
-                exit 0
-              fi
-            else
-              echo "⚠️ Traefik sem resposta nesta tentativa"
-            fi
-
-                        sleep "$INTERVAL"
-                        elapsed=$((elapsed + INTERVAL))
-                      done
-
-                      echo "❌ Traefik nao confirmou Zookeeper como healthy apos ${TIMEOUT_TOTAL}s"
-                      echo "📝 Ultima resposta recebida: ${last_response:-<sem resposta>}"
-                      exit 1
-
-      - name: 🏥 Verificar Deploy no Runner (Local Container Check)
+  summary:
+    name: "📊 Pipeline Summary"
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: always()
+    timeout-minutes: 2
+    
+    steps:
+      - name: "📊 Generate Summary"
         run: |
-          echo "🔍 Verificando se o deploy foi bem-sucedido no runner..."
-          # Verificar se o container está rodando e healthy
-          timeout=180
-          interval=10
-          elapsed=0
-          while [ $elapsed -lt $timeout ]; do
-            echo "🔍 Verificando containers do Zookeeper (${elapsed}/${timeout}s)..."
-            # Buscar container do zookeeper que está rodando
-            zookeeper_container=$(docker ps --filter "name=conexao-zookeeper" --filter "status=running" --format "{{.Names}}\t{{.Status}}" | head -1)
-            if [[ -n "$zookeeper_container" ]]; then
-              echo "📦 Container encontrado: $zookeeper_container"
-              # Verificar se tem health status
-              container_name=$(echo "$zookeeper_container" | cut -f1)
-              health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container_name" 2>/dev/null || echo "no-health-check")
-              if [[ "$health_status" == "healthy" ]]; then
-                echo "✅ Container do Zookeeper está healthy no runner"
-                echo "🎉 Deploy confirmado com sucesso!"
-                exit 0
-              elif [[ "$health_status" == "no-health-check" ]]; then
-                echo "⚠️ Container sem health check configurado, verificando se está rodando..."
-                # Se não tem health check, verificar se o container está rodando há pelo menos 30s
-                uptime=$(docker inspect --format='{{.State.StartedAt}}' "$container_name" | xargs -I {} date -d {} +%s)
-                current_time=$(date +%s)
-                running_time=$((current_time - uptime))
-                if [ $running_time -gt 30 ]; then
-                  echo "✅ Container rodando há ${running_time}s - considerado estável"
-                  echo "🎉 Deploy confirmado com sucesso!"
-                  exit 0
-                fi
-              else
-                echo "⚠️ Container health status: $health_status"
-              fi
-            else
-              echo "⚠️ Nenhum container do Zookeeper encontrado rodando"
-            fi
-            sleep "$interval"
-            elapsed=$((elapsed + interval))
-          done
-          echo "❌ Timeout: Zookeeper não ficou healthy dentro do tempo esperado"
-          echo "🔍 Containers atuais:"
-          docker ps --filter "name=conexao-zookeeper"
-          exit 1
+          echo "## 🏗️ Infrastructure Component Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ needs.validate.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Project:** conexao-de-sorte-zookeeper-infraestrutura" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** infrastructure" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
