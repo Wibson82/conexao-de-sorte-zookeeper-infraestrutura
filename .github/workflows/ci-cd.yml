@@ -176,19 +176,8 @@ jobs:
             fi
           }
 
-          # Criar secrets necessários para o Zookeeper
-          create_docker_secret_if_not_exists "ZOOKEEPER_ADMIN_PASSWORD" "zookeeper-admin-2024!"
-          create_docker_secret_if_not_exists "ZOOKEEPER_SUPER_USER" "super:zookeeper-super-2024!"
-
-          # JAAS Config para autenticação
-          jaas_config='Server {
-              org.apache.zookeeper.server.auth.DigestLoginModule required
-              user_super="zookeeper-super-2024!"
-              user_admin="zookeeper-admin-2024!";
-          };'
-          create_docker_secret_if_not_exists "ZOOKEEPER_JAAS_CONFIG" "$jaas_config"
-
-          echo "Docker secrets for Zookeeper created successfully."
+          # Configuração simplificada - sem secrets de autenticação
+          echo "✅ Zookeeper configurado sem autenticação para ambiente de desenvolvimento"
 
       - name: 🔴 Deploy Zookeeper Stack (Swarm-Only)
         env:

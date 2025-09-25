@@ -41,19 +41,8 @@ services:
       # 🚀 PERFORMANCE E ESTABILIDADE
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
-      # 🔐 SECURITY CONFIGURATION
-      ZOOKEEPER_AUTH_PROVIDER_X509: "org.apache.zookeeper.server.auth.X509AuthenticationProvider"
-      ZOOKEEPER_QUORUM_AUTH_ENABLE_SASL: "true"
-      ZOOKEEPER_QUORUM_AUTH_LEARNER_REQUIRE_SASL: "true"
-      ZOOKEEPER_QUORUM_AUTH_SERVER_REQUIRE_SASL: "true"
-      # Secrets via Docker Secrets
-      ZOOKEEPER_JAAS_CONFIG_FILE: "/run/secrets/ZOOKEEPER_JAAS_CONFIG"
-      ZOOKEEPER_ADMIN_PASSWORD_FILE: "/run/secrets/ZOOKEEPER_ADMIN_PASSWORD"
-      ZOOKEEPER_DIGEST_AUTH_SUPER_USER_FILE: "/run/secrets/ZOOKEEPER_SUPER_USER"
-    secrets:
-      - ZOOKEEPER_JAAS_CONFIG
-      - ZOOKEEPER_ADMIN_PASSWORD
-      - ZOOKEEPER_SUPER_USER
+      # 🔐 CONFIGURAÇÃO SIMPLIFICADA PARA DESENVOLVIMENTO
+      ZOOKEEPER_LOG4J_LOGGERS: "org.apache.zookeeper=WARN"
     networks:
       conexao-network-swarm:
         aliases:
@@ -124,18 +113,9 @@ services:
       - "microservice.required-by=kafka"
 
 # ============================================================================
-# 🔐 SECRETS EXTERNOS (Azure Key Vault)
+# 🔐 CONFIGURAÇÃO SIMPLIFICADA PARA DESENVOLVIMENTO
 # ============================================================================
-secrets:
-  ZOOKEEPER_JAAS_CONFIG:
-    external: true
-    name: ZOOKEEPER_JAAS_CONFIG
-  ZOOKEEPER_ADMIN_PASSWORD:
-    external: true
-    name: ZOOKEEPER_ADMIN_PASSWORD
-  ZOOKEEPER_SUPER_USER:
-    external: true
-    name: ZOOKEEPER_SUPER_USER
+# Secrets de autenticação removidos para compatibilidade com ambiente de desenvolvimento
 
 # ============================================================================
 # 📦 VOLUMES EXTERNOS
